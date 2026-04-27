@@ -1,0 +1,52 @@
+volumes:
+  HNG-nginx-logs:
+    driver: local
+  nextcloud_data:
+    driver: local
+
+networks:
+  hng-net:
+    driver: bridge
+
+services:
+  nextcloud:
+    image: kefaslungu/hng-nextcloud
+    container_name: nextcloud
+    networks:
+      - hng-net
+    volumes:
+      - nextcloud_data:/var/www/html
+      - HNG-nginx-logs:/var/log/nginx:ro
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    networks:
+      - hng-net
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - HNG-nginx-logs:/var/log/nginx
+    depends_on:
+      - nextcloud
+    restart: unless-stopped
+
+  detector:
+    build: ./detector
+    container_name: detector
+    networks:
+      - hng-net
+    environment:
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    volumes:
+      - HNG-nginx-logs:/var/log/nginx:ro
+      - /var/log/detector:/var/log/detector
+    cap_add:
+      - NET_ADMIN
+    privileged: true
+    restart: unless-stopped
+    depends_on:
+      - nginx
