@@ -13,7 +13,6 @@ from dashboard import init_dashboard, run_dashboard
 with open("config.yaml") as f:
     config = yaml.safe_load(f)
 
-# Override webhook from environment variable if set
 slack_webhook = os.getenv("SLACK_WEBHOOK_URL", "")
 if slack_webhook:
     config["slack"]["webhook_url"] = slack_webhook
@@ -34,6 +33,8 @@ state_lock = threading.Lock()
 init_dashboard(state, state_lock)
 
 WHITELIST = config["detection"].get("whitelist", [])
+last_global_alert = 0
+GLOBAL_ALERT_COOLDOWN = 30
 
 
 def is_whitelisted(ip):
@@ -65,6 +66,7 @@ def update_state():
 
 
 def process_logs():
+    global last_global_alert
     log_path = config["log"]["path"]
     print(f"Starting log monitor: {log_path}", flush=True)
     per_second = 0
@@ -98,16 +100,21 @@ def process_logs():
 
         anomalous, condition, rate, mean = detector.check_global()
         if anomalous:
-            print(
-                f"[GLOBAL] condition={condition} "
-                f"rate={rate} mean={mean:.2f}",
-                flush=True
-            )
-            send_slack(config, "GLOBAL ANOMALY", condition, rate, mean, "-")
-            send_audit_log(
-                "GLOBAL_ANOMALY", "-", condition,
-                str(rate), str(mean)
-            )
+            now = time.time()
+            if now - last_global_alert > GLOBAL_ALERT_COOLDOWN:
+                last_global_alert = now
+                print(
+                    f"[GLOBAL] condition={condition} "
+                    f"rate={rate} mean={mean:.2f}",
+                    flush=True
+                )
+                send_slack(
+                    config, "GLOBAL ANOMALY", condition, rate, mean, "-"
+                )
+                send_audit_log(
+                    "GLOBAL_ANOMALY", "-", condition,
+                    str(rate), str(mean)
+                )
 
 
 t1 = threading.Thread(target=process_logs, daemon=True)
